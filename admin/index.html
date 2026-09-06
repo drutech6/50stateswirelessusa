@@ -1,0 +1,876 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Content Manager</title>
+  <script src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
+  <style>
+    /* Custom Add Product button */
+    #custom-add-product-btn {
+      position: fixed;
+      top: 20px;
+      right: 250px;
+      z-index: 1000;
+      background: #3b82f6;
+      color: white;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      transition: all 0.2s;
+      display: none;
+    }
+    
+    #custom-add-product-btn:hover {
+      background: #2563eb;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 8px rgba(0,0,0,0.15);
+    }
+
+    /* Mode toggle button */
+    #mode-toggle-btn {
+      position: fixed;
+      top: 20px;
+      right: 245px;
+      z-index: 1000;
+      padding: 8px 20px;
+      border-radius: 40px;
+      font-weight: bold;
+      cursor: pointer;
+      border: none;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      transition: all 0.2s ease;
+    }
+
+    #mode-toggle-btn.local { background-color: #3b82f6; color: white; }
+    #mode-toggle-btn.github { background-color: #2ea44f; color: white; }
+
+    /* Custom CMS Toolbar Styles (Search & Sort) */
+    .cms-custom-toolbar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 15px;
+      align-items: center;
+    }
+    .cms-search-input {
+      padding: 8px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      width: 250px;
+      font-size: 14px;
+    }
+    .cms-sort-btn {
+      padding: 8px 12px;
+      background-color: #f3f4f6;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    .cms-sort-btn:hover {
+      background-color: #e5e7eb;
+    }
+    /* Floating CMS product search/sort toolbar */
+    #cms-product-tools {
+      position: fixed;
+      top: 50px;
+      right: 150px;
+      z-index: 2147483000;
+      display: none;
+      gap: 8px;
+      align-items: center;
+      background: rgba(255, 255, 255, 0.98);
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
+      padding: 8px;
+    }
+
+    #cms-product-tools input {
+      width: 260px;
+      padding: 8px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+    #cms-product-tools select {
+      padding: 8px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      background: #ffffff;
+      font-size: 14px;
+      min-width: 220px;
+    }
+  </style>
+  <script>
+    window.CMS_MANUAL_INIT = true;
+  </script>
+  <script src="https://unpkg.com/decap-cms@^3.0.0/dist/decap-cms.js"></script>
+</head>
+<body>
+  <script>
+    (function() {
+      // ----- Mode management -----
+      const MODE_STORAGE_KEY = 'decap_cms_mode';
+      let currentMode = localStorage.getItem(MODE_STORAGE_KEY) || 'local';
+
+      const toggleBtn = document.createElement('button');
+      toggleBtn.id = 'mode-toggle-btn';
+      toggleBtn.textContent = currentMode === 'local' ? '🌍 Local Mode' : '🐙 GitHub Mode';
+      toggleBtn.className = currentMode === 'local' ? 'local' : 'github';
+      document.body.appendChild(toggleBtn);
+
+      toggleBtn.addEventListener('click', () => {
+        const newMode = currentMode === 'local' ? 'github' : 'local';
+        localStorage.setItem(MODE_STORAGE_KEY, newMode);
+        window.location.reload();
+      });
+
+      // ----- Build CMS Configuration -----
+      function getCMSConfig(mode) {
+        const baseConfig = {
+          backend: { name: 'git-gateway', branch: 'main' },
+          media_folder: 'images',
+          public_folder: 'images',
+          collections: []
+        };
+
+        // 1. Site Configuration Collection
+        baseConfig.collections.push({
+          name: 'settings',
+          label: 'Site Configuration',
+          files: [
+            {
+              label: 'Branding & Colors',
+              name: 'branding',
+              file: '_data/branding.yml',
+              fields: [
+                { label: 'Name Part 1', name: 'name_part_one', widget: 'string' },
+                { label: 'Name Part 2', name: 'name_part_two', widget: 'string' },
+                { label: 'Text Size Class', name: 'text_size', widget: 'select', options: ['text-lg', 'text-xl', 'text-2xl'] },
+                { label: 'Font Weight', name: 'font_weight', widget: 'select', options: ['font-normal', 'font-bold', 'font-extrabold'] },
+                { label: 'Primary Color (Red)', name: 'color_one', widget: 'color' },
+                { label: 'Secondary Color (White)', name: 'color_two', widget: 'color' }
+              ]
+            },
+            {
+              label: 'Footer Content',
+              name: 'footer',
+              file: '_data/footer.yml',
+              fields: [
+                { label: 'Copyright Text', name: 'copyright_text', widget: 'string' },
+                { label: 'Slogan', name: 'slogan_text', widget: 'string' },
+                {
+                  label: 'Social Links', name: 'social_links', widget: 'list',
+                  fields: [
+                    { label: 'Platform Name', name: 'name', widget: 'string' },
+                    { label: 'URL', name: 'url', widget: 'string' },
+                    { label: 'SVG Icon Path', name: 'icon_path', widget: 'text' },
+                    { label: 'Hover Color Class', name: 'hover_color', widget: 'string' }
+                  ]
+                },
+                {
+                  label: 'Legal Links', name: 'legal_links', widget: 'list',
+                  fields: [
+                    { label: 'Link Text', name: 'text', widget: 'string' },
+                    { label: 'URL', name: 'url', widget: 'string' }
+                  ]
+                }
+              ]
+            },
+            {
+              label: 'Navigation Menu',
+              name: 'navigation',
+              file: '_data/navigation.yml',
+              fields: [
+                {
+                  label: 'Menu Links', name: 'menu_links', widget: 'list',
+                  fields: [
+                    { label: 'Link Text', name: 'text', widget: 'string' },
+                    { label: 'JS Function', name: 'function', widget: 'string', default: "app.setView('home')" }
+                  ]
+                }
+              ]
+            },
+            {
+              label: 'Marketing Buttons (CTA)',
+              name: 'marketing',
+              file: '_data/cta_buttons.yml',
+              fields: [
+                {
+                  label: 'Buttons', name: 'buttons', widget: 'list',
+                  fields: [
+                    { label: 'Button Text', name: 'text', widget: 'string' },
+                    { label: 'Function (JS)', name: 'function', widget: 'string', default: "app.setView('home','Category')" },
+                    { label: 'Background Color', name: 'bg_color', widget: 'color' },
+                    { label: 'Hover Color', name: 'hover_color', widget: 'color' },
+                    { label: 'Shape Class', name: 'button_shape', widget: 'select', options: ['rounded-full', 'rounded-lg'] },
+                    { label: 'Padding X', name: 'padding_x', widget: 'select', options: ['px-6', 'px-4', 'px-2'] },
+                    { label: 'Padding Y', name: 'padding_y', widget: 'select', options: ['py-3', 'py-5', 'py-7'] },
+                    { label: 'Text Size', name: 'text_size', widget: 'select', options: ['text-base', 'text-sm'] }
+                  ]
+                }
+              ]
+            },
+            {
+              label: 'Large Banner (Hero)',
+              name: 'hero',
+              file: '_data/hero.yml',
+              fields: [
+                { label: 'Background Color', name: 'bg_color', widget: 'color' },
+                {
+                  label: 'Headline Settings', name: 'headline', widget: 'object',
+                  fields: [
+                    { label: 'Headline Text', name: 'text', widget: 'string' },
+                    { label: 'Text Color', name: 'color', widget: 'color' },
+                    { label: 'Font Size', name: 'size', widget: 'select', options: ['text-3xl', 'text-4xl', 'text-5xl'] },
+                    { label: 'Font Weight', name: 'weight', widget: 'select', options: ['font-normal', 'font-semibold', 'font-bold', 'font-extrabold'] }
+                  ]
+                },
+                {
+                  label: 'Body Text Settings', name: 'subtext', widget: 'object',
+                  fields: [
+                    { label: 'Body Text', name: 'text', widget: 'text' },
+                    { label: 'Text Color', name: 'color', widget: 'color' },
+                    { label: 'Font Size', name: 'size', widget: 'select', options: ['text-sm', 'text-base', 'text-lg', 'text-xl', 'text-2xl'] }
+                  ]
+                }
+              ]
+            }
+          ]
+        });
+
+// 2. Product Collections Helper
+function createProductConfig(name, label, folder) {
+  return {
+    name: `products_${name}`,
+    label: label,
+    folder: folder,
+    create: true,
+    slug: '{{slug}}',
+    summary: '{{fields.id}} — {{fields.name}}',
+    display_fields: ['id', 'name'],
+    fields: [
+      {
+        label: 'ID',
+        name: 'id',
+        widget: 'string'
+      },
+      {
+        label: 'Category',
+        name: 'category',
+        widget: 'relation',
+        collection: 'categories', // Links to the new categories collection
+        value_field: 'name',      // Saves the string "Phone Plans"
+        search_fields: ['name'],
+        display_fields: ['name'],
+        multiple: false,
+        required: true,
+        hint: 'Select from existing categories. Create new ones in the "Categories" collection.'
+      },
+      {
+        label: 'Product Name',
+        name: 'name',
+        widget: 'string'
+      },
+      {
+        label: 'Price',
+        name: 'price',
+        widget: 'number',
+        required: false,
+        value_type: 'float',
+        hint: 'Leave empty if this product has variants. The variant price will be used on the storefront.'
+      },
+      {
+        label: 'Image',
+        name: 'image',
+        widget: 'image',
+        required: false
+      },
+      {
+        label: 'Description',
+        name: 'description',
+        widget: 'text',
+        required: false
+      },
+      {
+        label: 'Variants',
+        name: 'variants',
+        widget: 'list',
+        required: false,
+        collapsed: true,
+        fields: [
+          {
+            label: 'Variant ID',
+            name: 'id',
+            widget: 'number'
+          },
+          {
+            label: 'Color',
+            name: 'color',
+            widget: 'string'
+          },
+          {
+            label: 'Price',
+            name: 'price',
+            widget: 'number',
+            value_type: 'float'
+          },
+          {
+            label: 'Image',
+            name: 'image',
+            widget: 'image',
+            required: false
+          }
+        ]
+      }
+    ]
+  };
+}
+
+// --- ADD THIS NEW COLLECTION BEFORE PRODUCT CATEGORIES ---
+const categoriesConfig = {
+  name: 'categories',
+  label: 'Product Categories',
+  description: 'Add new categories here. Products will be assigned to these.',
+  folder: '_categories', // Folder where category files are stored
+  create: true,
+  delete: true, // <--- ENABLES DELETION
+  slug: '{{name}}', // Uses the category name as the filename
+  fields: [
+    {
+      label: 'Category Name',
+      name: 'name',
+      widget: 'string',
+      required: true,
+      hint: 'This must match the category name used in products (e.g., "Laptops & Accessories")'
+    },
+    {
+      label: 'Folder Name (Slug)',
+      name: 'slug',
+      widget: 'string',
+      required: true,
+      hint: 'Used for the folder structure (e.g., "laptops-accessories"). Leave blank to auto-generate from Name.'
+    },
+    {
+      label: 'Display Label',
+      name: 'display_label',
+      widget: 'string',
+      required: false,
+      hint: 'Optional: A nicer label to show in the dropdown (e.g., "Laptops & Accessories") if slug is technical.'
+    }
+  ],
+  summary: 'Category: {{fields.name}}'
+};
+
+// Add Categories Collection
+baseConfig.collections.push(categoriesConfig);
+
+// 3. Category Mapping (To ensure CMS folder matches Product Folder)
+// We keep the old static list here only to define the DEFAULT folders for NEW products
+// so they land in the right place, but users can now change the Category name freely.
+const productCategories = [
+  { name: 'Phone Plans', folder: '_products/phone-plans' },
+  { name: 'Internet Services', folder: '_products/internet-services', label: 'Internet Services' },
+  { name: 'Tablets', folder: '_products/tablets', label: 'Tablets' },
+  { name: 'Phones', folder: '_products/phones', label: 'Phones' },
+  { name: 'WiFi Plans', folder: '_products/wifi-plans', label: 'WiFi Plans' },
+  { name: 'Headsets & Earbuds', folder: '_products/headsets-earbuds', label: 'Headsets & Earbuds' },
+  { name: 'Smart Watches', folder: '_products/smart-watches', label: 'Smart Watches' },
+  { name: 'Laptops & Accessories', folder: '_products/laptops-accessories', label: 'Laptops & Accessories' },
+  { name: 'Games & Gaming Accessories', folder: '_products/games-gaming-accessories', label: 'Games & Gaming Accessories' },
+  { name: 'Smart Phones & Tablets Accessories', folder: '_products/smart-phones-tablets-accessories', label: 'Smart Phones & Tablets Accessories' },
+  { name: 'Chargers', folder: '_products/chargers', label: 'Chargers' },
+  { name: 'Pre-Owned Phones & Tablets', folder: '_products/preowned-phones-tablets', label: 'Pre-Owned Phones & Tablets' },
+  { name: 'Wireless Speakers', folder: '_products/wireless-speakers', label: 'Wireless Speakers' },
+  { name: 'Security Camera Systems', folder: '_products/security-camera-systems', label: 'Security Camera Systems' }
+];
+
+        productCategories.forEach(cat => {
+          baseConfig.collections.push(createProductConfig(cat.name, cat.label || cat.name, cat.folder));
+        });
+
+        // 3. Mode Configuration
+        if (mode === 'local') {
+          baseConfig.local_backend = true;
+        } else {
+          delete baseConfig.local_backend;
+        }
+        return baseConfig;
+      }
+
+function initCMS() {
+  if (window.CMS && typeof window.CMS.init === 'function') {
+    const config = getCMSConfig(currentMode);
+    window.CMS.init({ config: config });
+
+    // Automatically trigger YAML build whenever content is published in CMS
+    window.CMS.registerEventListener({
+      name: 'postPublish',
+      handler: ({ entry }) => {
+        console.log('Publish detected. Updating products.yml...');
+        fetch('http://localhost:3001/api/build-yaml', { method: 'POST' })
+          .then(res => res.json())
+          .then(data => console.log('YAML build response:', data))
+          .catch(err => console.error('Failed to trigger auto-yaml build:', err));
+      },
+    });
+  } else {
+    setTimeout(initCMS, 100);
+  }
+}
+
+      window.addEventListener('load', initCMS);
+    })();
+  </script>
+
+<!-- Custom Button & Search/Sort Logic -->
+<script>
+window.addEventListener('load', function() {
+  // --------------------------------------------------
+
+  // --------------------------------------------------
+  // 2. Show Add Product button only on product pages
+  // --------------------------------------------------
+  const handleVisibility = () => {
+    if (window.location.hash.includes('products_')) {
+      customBtn.style.display = 'block';
+    } else {
+      customBtn.style.display = 'none';
+    }
+  };
+
+  window.addEventListener('hashchange', handleVisibility);
+  setInterval(handleVisibility, 500);
+
+  // --------------------------------------------------
+  // 3. Load real product data from local product API
+  //
+  // This allows CMS search/sort to use:
+  // - product name
+  // - description
+  // - lowest variant price
+  //
+  // So the main product price can remain empty when
+  // the product has variants.
+  // --------------------------------------------------
+  let productLookup = new Map();
+
+  async function loadProductLookup() {
+    try {
+      const response = await fetch('http://localhost:3001/api/products.json', {
+        cache: 'no-store'
+      });
+
+      if (!response.ok) return;
+
+      const products = await response.json();
+      const next = new Map();
+
+      (Array.isArray(products) ? products : []).forEach(p => {
+        const id = String(p.id || '').trim();
+
+        if (!id) return;
+
+        const variantPrices = (Array.isArray(p.variants) ? p.variants : [])
+          .map(v => Number(v.price))
+          .filter(n => !Number.isNaN(n));
+
+        // Storefront behavior:
+        // if product has variants, use lowest variant price
+        const displayPrice = variantPrices.length
+          ? Math.min(...variantPrices)
+          : Number(p.price || 0);
+
+        next.set(id, {
+          id,
+          name: p.name || '',
+          description: p.description || '',
+          category: p.category || '',
+          price: displayPrice
+        });
+      });
+
+      productLookup = next;
+    } catch (err) {
+      console.warn(
+        'CMS product lookup unavailable. Make sure serve-products.js is running.',
+        err
+      );
+    }
+  }
+
+  // --------------------------------------------------
+  // 4. Floating search/sort toolbar
+  // --------------------------------------------------
+  let toolbar = document.getElementById('cms-product-tools');
+
+  if (!toolbar) {
+    toolbar = document.createElement('div');
+    toolbar.id = 'cms-product-tools';
+
+    toolbar.innerHTML = `
+      <input id="cms-product-search" type="text" placeholder="Search ID, name, description...">
+      <select id="cms-product-sort">
+        <option value="id_asc">Sort by ID: Low to High</option>
+        <option value="id_desc">Sort by ID: High to Low</option>
+        <option value="name_asc">Sort by Name: A to Z</option>
+        <option value="name_desc">Sort by Name: Z to A</option>
+        <option value="price_asc">Sort by Price: Low to High</option>
+        <option value="price_desc">Sort by Price: High to Low</option>
+      </select>
+    `;
+
+    document.body.appendChild(toolbar);
+  }
+
+  const searchInput = document.getElementById('cms-product-search');
+  const sortSelect = document.getElementById('cms-product-sort');
+
+  const state = {
+    query: '',
+    sort: 'id_asc',
+    signature: ''
+  };
+
+  function isProductListPage() {
+    return window.location.hash.includes('#/collections/products_');
+  }
+
+  // --------------------------------------------------
+  // 5. Find CMS product entry items
+  //
+  // This version does NOT rely only on .cms-list__items.
+  // It first tries the old selector, then falls back to
+  // finding actual entry links.
+  // --------------------------------------------------
+  function getEntryItems() {
+    // Old/current known Decap selector
+    const legacyContainer = document.querySelector('.cms-list__items');
+
+    if (legacyContainer && legacyContainer.children.length) {
+      const legacyItems = Array.from(legacyContainer.children).filter(
+        el => el.nodeType === 1 && !el.closest('#cms-product-tools')
+      );
+
+      if (legacyItems.length) return legacyItems;
+    }
+
+    // More generic fallback:
+    // Decap entry links usually contain #/collections/products_.../entries/...
+    const links = Array.from(
+      document.querySelectorAll(
+        'a[href*="#/collections/products_"][href*="/entries/"]'
+      )
+    );
+
+    if (!links.length) return [];
+
+    // Find common container for all entry links
+    let container = links[0].parentElement;
+
+    while (container && !links.every(link => container.contains(link))) {
+      container = container.parentElement;
+    }
+
+    if (!container) return links;
+
+    const seen = new Set();
+    const items = [];
+
+    links.forEach(link => {
+      let item = link;
+
+      // Move up from the link until we reach the direct child of the list container
+      while (item && item.parentElement !== container) {
+        item = item.parentElement;
+      }
+
+      if (!item || seen.has(item) || item.closest('#cms-product-tools')) return;
+
+      seen.add(item);
+      items.push(item);
+    });
+
+    // If the container detection was too high-level, fall back to the links themselves
+    if (items.length <= 1 && links.length > 1) {
+      return links;
+    }
+
+    return items;
+  }
+
+  function getItemText(item) {
+    const inputText = Array.from(item.querySelectorAll('input, textarea'))
+      .map(el => el.value || '')
+      .join(' ');
+
+    return [item.innerText || '', item.textContent || '', inputText]
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function extractIdFromItem(item) {
+    const text = getItemText(item);
+
+    // Summary format is:
+    // 403 — Product Name
+    const explicitId = text.match(/(?:^|\s|ID:?\s*)(\d{1,12})(?:\s|[-—•:)]|$)/i);
+
+    if (explicitId) return explicitId[1];
+
+    const firstNumber = text.match(/\b(\d{1,12})\b/);
+
+    return firstNumber ? firstNumber[1] : '';
+  }
+
+  function getApiForItem(item) {
+    const id = extractIdFromItem(item);
+    return productLookup.get(String(id)) || null;
+  }
+
+  function extractName(item) {
+    const api = getApiForItem(item);
+
+    if (api && api.name) {
+      return api.name.toLowerCase();
+    }
+
+    const text = getItemText(item);
+
+    const titleElement = item.querySelector(
+      'h1, h2, h3, h4, [class*="summary"], [class*="title"], a'
+    );
+
+    let name = titleElement
+      ? titleElement.innerText || titleElement.textContent || ''
+      : text;
+
+    // Remove leading ID if present:
+    // "403 — Dell Latitude" becomes "Dell Latitude"
+    return name
+      .replace(/^\s*\d+\s*[-—•:.)]\s*/, '')
+      .toLowerCase();
+  }
+
+  function extractPrice(item) {
+    const api = getApiForItem(item);
+
+    // Preferred:
+    // Use real storefront price from local product API.
+    // For variant products, this is the lowest variant price.
+    if (api && typeof api.price === 'number' && !Number.isNaN(api.price)) {
+      return api.price;
+    }
+
+    // Fallback:
+    // Try to parse anything that looks like money from the CMS row.
+    const text = getItemText(item);
+
+    const moneyMatch = text.match(/\$\s*([0-9]+(?:[,.][0-9]{1,2})?)/);
+
+    if (moneyMatch) {
+      return parseFloat(moneyMatch[1].replace(',', ''));
+    }
+
+    const numbers = text.match(/[0-9]+(?:[,.][0-9]{1,2})?/g) || [];
+    const decimalNumbers = numbers.filter(num => /\.[0-9]{2}$/.test(num));
+
+    const candidate = decimalNumbers.length
+      ? decimalNumbers[decimalNumbers.length - 1]
+      : numbers[numbers.length - 1];
+
+    return candidate
+      ? parseFloat(candidate.replace(',', ''))
+      : Number.MAX_SAFE_INTEGER;
+  }
+
+  function getSearchText(item) {
+    const api = getApiForItem(item);
+    const text = getItemText(item);
+    const id = extractIdFromItem(item);
+
+    return [
+      text,
+      id,
+      api ? api.name : '',
+      api ? api.description : '',
+      api ? api.category : ''
+    ]
+      .join(' ')
+      .toLowerCase();
+  }
+
+  function applyTools(force = false) {
+    const onProductPage = isProductListPage();
+
+    toolbar.style.display = onProductPage ? 'flex' : 'none';
+
+    if (!onProductPage) return;
+
+    const items = getEntryItems();
+
+    if (!items.length) return;
+
+    const parent = items[0].parentNode;
+
+    if (!parent) return;
+
+    const query = state.query.trim().toLowerCase();
+    const sorted = [...items];
+
+    sorted.sort((a, b) => {
+      if (state.sort.startsWith('name')) {
+        const nameA = extractName(a);
+        const nameB = extractName(b);
+
+        return state.sort === 'name_asc'
+          ? nameA.localeCompare(nameB)
+          : nameB.localeCompare(nameA);
+      }
+
+      if (state.sort.startsWith('price')) {
+        const priceA = extractPrice(a);
+        const priceB = extractPrice(b);
+
+        return state.sort === 'price_asc'
+          ? priceA - priceB
+          : priceB - priceA;
+      }
+
+      const idA = parseInt(extractIdFromItem(a) || Number.MAX_SAFE_INTEGER, 10);
+      const idB = parseInt(extractIdFromItem(b) || Number.MAX_SAFE_INTEGER, 10);
+
+      return state.sort === 'id_asc'
+        ? idA - idB
+        : idB - idA;
+    });
+
+    // Prevent unnecessary DOM manipulation if nothing changed
+    const signature = [
+      state.query,
+      state.sort,
+      sorted
+        .map(item => {
+          return (
+            item.getAttribute('href') ||
+            item.querySelector('a[href*="/entries/"]')?.getAttribute('href') ||
+            extractIdFromItem(item) ||
+            getItemText(item).slice(0, 80)
+          );
+        })
+        .join('|')
+    ].join('::');
+
+    if (!force && state.signature === signature) return;
+
+    sorted.forEach(item => {
+      const text = getSearchText(item);
+
+      item.style.display = !query || text.includes(query) ? '' : 'none';
+
+      // Re-append in sorted order
+      parent.appendChild(item);
+    });
+
+    state.signature = signature;
+  }
+
+  searchInput.addEventListener('input', () => {
+    state.query = searchInput.value;
+    state.signature = '';
+    applyTools(true);
+  });
+
+  sortSelect.addEventListener('change', () => {
+    state.sort = sortSelect.value;
+    state.signature = '';
+    applyTools(true);
+  });
+
+  // Watch Decap DOM changes and reapply when the list renders/updates
+  let debounceTimer;
+
+  const observer = new MutationObserver(() => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => applyTools(false), 250);
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+
+  window.addEventListener('hashchange', () => {
+    state.signature = '';
+    loadProductLookup().then(() => applyTools(true));
+  });
+
+  loadProductLookup().then(() => {
+    setTimeout(() => applyTools(true), 2500);
+  });
+
+  // Periodic safety check
+  setInterval(() => {
+    if (isProductListPage()) {
+      applyTools(false);
+    }
+  }, 3000);
+
+  // Refresh product lookup periodically in case products were edited/saved
+  setInterval(loadProductLookup, 30000);
+
+  // --------------------------------------------------
+  // 6. Scroll to new product after clicking Add Product
+  // --------------------------------------------------
+  const scrollToNewProduct = () => {
+    let attempts = 0;
+
+    const checkExist = setInterval(() => {
+      const labels = Array.from(document.querySelectorAll('label'));
+      const idLabels = labels.filter(el => el.textContent.trim() === 'ID');
+
+      if (idLabels.length > 0) {
+        const newestIdField = idLabels[idLabels.length - 1];
+
+        newestIdField.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center'
+        });
+
+        setTimeout(() => window.scrollBy(0, -100), 300);
+        clearInterval(checkExist);
+      }
+
+      attempts++;
+
+      if (attempts > 20) clearInterval(checkExist);
+    }, 100);
+  };
+
+  customBtn.onclick = function() {
+    const buttons = Array.from(document.querySelectorAll('button'));
+
+    const addBtn = buttons.find(
+      b =>
+        b.textContent.includes('Add') &&
+        (b.closest('.cms-collection-list') ||
+          b.closest('[class*="collection"]'))
+    );
+
+    if (addBtn) {
+      addBtn.click();
+      scrollToNewProduct();
+    }
+  };
+});
+</script>
+  </script>
+</body>
+</html>
+

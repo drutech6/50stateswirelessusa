@@ -1,0 +1,125 @@
+<!-- (_includes/header.html) -->
+<header class="nrw-bg-blue shadow-lg sticky top-0 z-50">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="flex items-center justify-between h-16">
+      <div class="flex-shrink-0 flex items-center">
+        <!-- Logo -->
+        <a href="#" onclick="app.setView('home')" 
+           class="{{ site.data.branding.text_size }} {{ site.data.branding.font_weight }} tracking-tight" 
+           style="line-height: 1; color: {{ site.data.branding.color_one }};">
+   
+          {{ site.data.branding.name_part_one }}<span class="ml-0.5" style="color: {{ site.data.branding.color_two }};">{{ site.data.branding.name_part_two }}</span>
+        </a>
+
+        <!-- Navigation Links (Logo, Home, Shop Categories) -->
+        <nav class="hidden md:flex ml-6 space-x-4">
+          <button onclick="app.setView('home')" 
+                  class="text-white hover:text-red-300 px-3 py-2 rounded-md text-sm font-medium transition duration-150">
+            Home
+          </button>
+          <button onclick="app.shopCategoriesAction()" 
+                  class="text-white hover:text-red-300 px-3 py-2 rounded-md text-sm font-medium transition duration-150">
+            Shop Categories
+          </button>
+        </nav>
+      </div>
+
+      <!-- Cart Wrapper with Hover Logic -->
+      <div class="flex items-center relative group" id="cart-wrapper">
+        <button id="cartButton" class="relative p-2 rounded-full text-white nrw-text-red nrw-btn-blue hover:text-white transition duration-150 focus:outline-none z-50">
+          <svg id="shopping-cart-icon" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+          <span id="cartCount" class="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white transform translate-x-1/2 -translate-y-1/2 nrw-bg-red rounded-full">0</span>
+        </button>
+
+        <!-- The Hover Dropdown -->
+        <div id="cartDropdown" class="absolute right-0 top-full mt-2 w-80 bg-white rounded-lg shadow-2xl border border-gray-200 p-4 hidden opacity-0 invisible transition-all duration-300 transform origin-top-right z-50 group-hover:opacity-100 group-hover:visible group-hover:translate-y-0 translate-y-2">
+          <div id="cart-dropdown-content">
+            <div class="text-center py-4 text-gray-500">
+              <p class="text-sm">Your cart is empty</p>
+            </div>
+          </div>
+          <div class="mt-4 border-t pt-3">
+            <button onclick="app.setView('cart')" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded shadow transition">
+              View Full Cart & Checkout
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</header>
+
+<!-- JavaScript for Cart Hover Logic -->
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const cartButton = document.getElementById('cartButton');
+    const cartDropdown = document.getElementById('cartDropdown');
+    const cartWrapper = document.getElementById('cart-wrapper');
+    let cartHoverTimeout;
+    let previousView = 'home';
+
+    const resetDropdownState = () => {
+      clearTimeout(cartHoverTimeout);
+      cartDropdown.classList.add('hidden', 'opacity-0', 'invisible', 'translate-y-2');
+      cartDropdown.classList.remove('opacity-100', 'visible', 'translate-y-0');
+    };
+
+    const openCart = () => {
+      // Disable hover rendering if already on cart page
+      if (window.app && window.app.view === 'cart') {
+        return;
+      }
+      clearTimeout(cartHoverTimeout);
+      cartDropdown.classList.remove('hidden');
+      setTimeout(() => {
+        cartDropdown.classList.remove('opacity-0', 'invisible', 'translate-y-2');
+        cartDropdown.classList.add('opacity-100', 'visible', 'translate-y-0');
+      }, 10);
+      if (window.app) {
+        window.app.renderCartDropdown();
+      }
+    };
+
+    const closeCart = () => {
+      // Disable closing logic if already on cart page (to ensure it stays closed)
+      if (window.app && window.app.view === 'cart') {
+        // Force close and do nothing else
+        resetDropdownState();
+        return;
+      }
+      cartHoverTimeout = setTimeout(() => {
+        cartDropdown.classList.add('hidden', 'opacity-0', 'invisible', 'translate-y-2');
+        cartDropdown.classList.remove('opacity-100', 'visible', 'translate-y-0');
+      }, 300);
+    };
+
+    setInterval(() => {
+      if (window.app && window.app.view !== previousView) {
+        if (previousView === 'cart' && window.app.view !== 'cart') {
+          resetDropdownState();
+          const dropdown = document.getElementById('cartDropdown');
+          if (dropdown) dropdown.style.display = ''; 
+        }
+        previousView = window.app.view;
+      }
+    }, 100);
+
+    cartButton.addEventListener('mouseenter', () => {
+      openCart();
+    });
+
+    cartWrapper.addEventListener('mouseleave', () => {
+      closeCart();
+    });
+
+    cartDropdown.addEventListener('mouseenter', () => {
+      clearTimeout(cartHoverTimeout);
+    });
+
+    cartDropdown.addEventListener('mouseleave', () => {
+      closeCart();
+    });
+  });
+</script>
+

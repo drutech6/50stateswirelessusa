@@ -1,0 +1,1258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  {% include head.html %}
+  <style>
+    .cta-button.auto-hover-effect {
+      transform: translateY(-2px) !important;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2) !important;
+      transition: all 0.2s ease !important;
+    }
+    
+    /* Cart Custom Scrollbar Styles */
+    .cart-items-scroll {
+      max-height: 520px;
+      overflow-y: auto;
+    }
+    .cart-items-scroll::-webkit-scrollbar {
+      width: 6px;
+    }
+    .cart-items-scroll::-webkit-scrollbar-thumb {
+      background-color: #cbd5e1;
+      border-radius: 4px;
+    }
+
+    /* Dropdown Styles for Header */
+    #cartDropdown {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    /* Sidebar Styles */
+    .sidebar-wrapper {
+      position: sticky;
+      top: 80px; /* Below the fixed header */
+      height: calc(100vh - 100px);
+      overflow-y: auto;
+      /* Hide scrollbar */
+      scrollbar-width: none; /* Firefox */
+      -ms-overflow-style: none;  /* IE 10+ */
+      padding-right: 8px; /* Space for scrollbar area if it ever shows */
+    }
+    .sidebar-wrapper::-webkit-scrollbar { 
+      display: none; /* Chrome/Safari */
+    }
+
+    /* Sidebar Link Animations */
+    .sidebar-link {
+      transition: all 0.2s ease;
+      padding: 6px 8px;
+      margin-bottom: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 200px; /* Adjust based on desired width */
+      cursor: pointer;
+    }
+    .sidebar-link.active {
+      font-weight: bold;
+      padding-left: 16px; /* Indent */
+      color: #dc2626;
+      background-color: #f3f4f6;
+      border-radius: 4px;
+    }
+    .sidebar-link:hover {
+      background-color: #e5e7eb;
+      padding-left: 16px; /* Hover effect matches active indent */
+    }
+
+    /* Product Image Size Reduction */
+    .product-card img {
+      max-height: 140px !important;
+      object-fit: contain !important;
+    }
+    
+    /* Smooth scroll offset for sticky header */
+    html {
+      scroll-behavior: smooth;
+    }
+    .target-scroll {
+      scroll-margin-top: 100px;
+    }
+    
+    /* --- SIDEBAR HIDE LOGIC --- */
+    /* Hide sidebar when cart view is active */
+    #main-sidebar.cart-hidden {
+      display: none !important;
+    }
+    
+    /* Ensure search input style allows continuous typing */
+    #search-input {
+      caret-color: black;
+    }
+
+    /* Filter Area Adjustments */
+    #filter-area {
+      border-bottom: 0; /* No bottom border */
+      margin-top: 0.5rem; /* Small space between affiliate links and filter area in Home view */
+      transition: margin-top 0.3s ease, border-top 0.3s ease;
+    }
+    
+    /* When filtering, add a top border and remove margin to sit right under nav */
+    #filter-area.filter-mode {
+      border-top: 4px solid #e5e7eb;
+      margin-top: 0;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col bg-gray-50">
+  {% include header.html %}
+
+  <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div id="loading-spinner" class="text-center py-20">
+      <div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-600 border-t-transparent"></div>
+      <p class="mt-4 text-gray-600 font-medium">Loading catalog...</p>
+    </div>
+    
+    <div id="main-layout" class="hidden">
+      <!-- 
+        Layout Structure:
+        On large screens (lg): 
+        [ Sidebar (Left) ] [ Main Content (Right) ]
+        
+        The Sidebar is sticky so it stays while scrolling products.
+        The Main Content contains the Banner, Affiliate Links, and Products.
+      -->
+      <div class="flex flex-col lg:flex-row gap-8" id="app-container-wrapper">
+        
+        <!-- Sidebar (Left) - Only visible on Large Screens AND when NOT on Cart -->
+        <aside id="main-sidebar" class="hidden lg:block w-48 flex-shrink-0">
+          <div class="sidebar-wrapper">
+            <div id="sidebar-content" class="space-y-1">
+              <!-- Categories Injected Here -->
+            </div>
+          </div>
+        </aside>
+
+        <!-- Main Content (Right) -->
+        <div class="flex-grow min-w-0">
+          <div id="app-container">
+            <!-- Content Injected Here -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  {% include footer.html %}
+
+<script>
+// Global Error Handler
+window.onerror = function(message, source, lineno, colno, error) {
+  console.error("Global Error:", message, "at line:", lineno);
+  const spinner = document.getElementById('loading-spinner');
+  if (spinner) {
+    spinner.innerHTML = `<div class="text-red-600 font-bold">Error loading application.</div><p class="text-sm text-gray-500 mt-2">${message}</p>`;
+  }
+};
+
+// Inject CMS Configurations
+const ctaButtonsData = {{ site.data.cta_buttons.buttons | jsonify }} || [];
+const bannerData = {{ site.data.banner | jsonify }} || {}; 
+
+const app = {
+  view: 'home',
+  currentProductId: null,
+  filterCategory: null,
+  sortBy: 'id_asc',
+  currentPage: 1,
+  pageSize: 12, 
+  searchQuery: '',
+  isSidebarVisible: false,
+  
+  // --- Search Debounce Logic ---
+  searchTimeout: null,
+  isTyping: false,
+  // ----------------------------
+  
+  // --- PERSISTENCE LOGIC START ---
+  getCartFromStorage: function() {
+    try {
+      const storedCart = localStorage.getItem('50states_wireless_cart');
+      if (storedCart) {
+        const parsed = JSON.parse(storedCart);
+        return Array.isArray(parsed) ? parsed : [];
+      }
+    } catch (e) {
+      console.error("Error reading cart from localStorage", e);
+    }
+    return [];
+  },
+
+  saveCartToStorage: function() {
+    try {
+      localStorage.setItem('50states_wireless_cart', JSON.stringify(this.cart));
+    } catch (e) {
+      console.error("Error saving cart to localStorage", e);
+    }
+  },
+  // --- PERSISTENCE LOGIC END ---
+
+  cart: [], 
+  selectedVariantId: null,
+  selectedBrowseVariants: {},
+  rawProducts: [],
+  products: [],
+
+  subscriptionCategories: ['Phone Plans', 'Internet Services', 'WiFi Plans', 'Phone Plan', 'WiFi'],
+
+  isSubscription: function(category) {
+    return this.subscriptionCategories.includes(category);
+  },
+
+  updateCartCount: function() {
+    const count = this.cart.reduce((sum, item) => sum + item.quantity, 0);
+    const cartEl = document.getElementById('cartCount');
+    if (cartEl) cartEl.textContent = count;
+    this.renderCartDropdown();
+  },
+
+  renderCartDropdown: function() {
+    const dropdownContent = document.getElementById('cart-dropdown-content');
+    if (!dropdownContent) return;
+
+    // Disable hover rendering if already on cart page
+    if (this.view === 'cart') return;
+
+    if (this.cart.length === 0) {
+      dropdownContent.innerHTML = `<div class="text-center py-4 text-gray-500"><p class="text-sm">Your cart is empty</p></div>`;
+      return;
+    }
+
+    let subtotal = 0;
+    this.cart.forEach(item => {
+      const match = this.getProductVariantOrBase(item.id);
+      if (match) {
+        const price = match.variant ? match.variant.price : match.product.price;
+        subtotal += price * item.quantity;
+      }
+    });
+
+    const taxRate = 0.08875;
+    const tax = subtotal * taxRate;
+    const orderTotal = subtotal + tax;
+
+    let html = '<div class="space-y-3 mb-4">';
+    const displayItems = this.cart.slice(0, 3);
+    displayItems.forEach(item => {
+      const match = this.getProductVariantOrBase(item.id);
+      if (!match) return;
+      const { product, variant } = match;
+      const title = variant ? `${product.name} (${variant.color})` : product.name;
+      const price = variant ? variant.price : product.price;
+      const image = variant ? variant.image : product.image;
+      const itemTotal = price * item.quantity;
+
+      html += `
+        <div class="flex items-center gap-3">
+          <img src="${image}" class="w-10 h-10 object-contain rounded bg-gray-100 border p-1">
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium text-gray-900 truncate">${title}</p>
+            <p class="text-xs text-gray-500">${item.quantity} x ${this.formatCurrency(price)}</p>
+          </div>
+          <p class="text-sm font-bold text-gray-900">${this.formatCurrency(itemTotal)}</p>
+        </div>
+      `;
+    });
+    html += '</div>';
+
+    if (this.cart.length > 3) {
+      html += `<p class="text-xs text-gray-500 text-center mb-2">And ${this.cart.length - 3} more items...</p>`;
+    }
+
+    html += `
+      <div class="space-y-1 pt-2 border-t border-gray-200">
+        <div class="flex justify-between text-sm text-gray-600"><span>Subtotal:</span><span>${this.formatCurrency(subtotal)}</span></div>
+        <div class="flex justify-between text-sm text-gray-600"><span>Tax (8.875%):</span><span>${this.formatCurrency(tax)}</span></div>
+        <div class="flex justify-between font-bold text-gray-900 pt-1 border-t border-gray-200"><span>Total:</span><span>${this.formatCurrency(orderTotal)}</span></div>
+      </div>
+    `;
+
+    dropdownContent.innerHTML = html;
+  },
+
+  init: async function() {
+    try {
+      this.cart = this.getCartFromStorage();
+      const fetchUrl = 'http://localhost:3001/api/products.json'; 
+      console.log("Fetching from Fast API:", fetchUrl);
+      
+      const response = await fetch(fetchUrl);
+      if (!response.ok) {
+        if (response.status === 404) throw new Error("Node server returned 404. Check if _products/ folder exists.");
+        if (response.status === 403 || response.status === 0) throw new Error("Network Error: Ensure Node server is running on port 3001.");
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      this.rawProducts = await response.json();
+      if (!this.rawProducts || !Array.isArray(this.rawProducts)) throw new Error("Invalid product data format.");
+
+      this.processProducts();
+      
+      // Show main layout
+      document.getElementById('loading-spinner').style.display = 'none';
+      document.getElementById('main-layout').classList.remove('hidden');
+      
+      this.renderSidebar();
+      this.render();
+
+    } catch (err) {
+      console.error("Critical Error in app.init:", err);
+      this.showErrorMessage("Failed to initialize catalog: " + err.message);
+    }
+  },
+
+  showErrorMessage: function(msg) {
+    const container = document.getElementById('main-layout');
+    if (container) {
+      container.innerHTML = `
+        <div class="max-w-2xl mx-auto bg-red-50 border border-red-200 p-8 rounded-xl mt-10 text-center">
+          <h1 class="text-2xl font-bold text-red-700 mb-4">Application Error</h1>
+          <p class="text-red-600 mb-4">${msg}</p>
+          <button onclick="location.reload()" class="mt-4 bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">Retry</button>
+        </div>
+      `;
+    }
+  },
+
+  processProducts: function() {
+    const flattened = [];
+    if (!this.rawProducts) return;
+
+    this.rawProducts.forEach(product => {
+      const safeName = product.name || "Unknown Product";
+      const safeCategory = product.category || "Uncategorized";
+      const safePrice = product.price || 0;
+      const safeDescription = product.description || "";
+      const safeImage = product.image || "";
+
+      if (product.variants && Array.isArray(product.variants) && product.variants.length > 0) {
+        const validPrices = product.variants.map(v => {
+          const p = typeof v.price === 'number' ? v.price : parseFloat(v.price);
+          return (isNaN(p) ? 0 : p);
+        });
+        
+        flattened.push({
+          id: product.id || Date.now() + Math.random(),
+          name: safeName,
+          category: safeCategory,
+          price: Math.min(...validPrices),
+          description: safeDescription,
+          image: product.variants[0].image || safeImage,
+          hasVariants: true,
+          baseProduct: product
+        });
+      } else {
+        flattened.push({
+          id: product.id || Date.now() + Math.random(),
+          name: safeName,
+          category: safeCategory,
+          price: typeof safePrice === 'number' ? safePrice : parseFloat(safePrice) || 0,
+          description: safeDescription,
+          image: safeImage,
+          hasVariants: false,
+          baseProduct: product
+        });
+      }
+    });
+    this.products = flattened;
+  },
+
+  pluralizeCategory: (category) => {
+    const exceptions = {
+      'Watch': 'Watch',
+      'Smart Watches': 'Smart Watches',
+      'Phone Plan': 'Phone Plans',
+      'Phone': 'Phones',
+      'Tablet': 'Tablets',
+      'Computer': 'Computers',
+      'Charger': 'Chargers',
+      'Security Camera Systems': 'Security Camera Systems',
+      'WiFi': 'WiFi Plans',
+      'Headsets & Earbuds': 'Headsets & Earbuds',
+      'Smart Phones & Tablets Accessories': 'Smart Phones & Tablets Accessories',
+      'Laptops & Accessories': 'Laptops & Accessories',
+      'Pre-Owned Phones & Tablets': 'Pre-Owned Phones & Tablets',
+      'Games & Gaming Accessories': 'Games & Gaming Accessories',
+      'Wireless Speakers': 'Wireless Speakers'
+    };
+    return exceptions[category] || category;
+  },
+
+  toggleDescription: () => {
+    const description = document.getElementById('product-description');
+    const button = document.getElementById('toggle-description');
+    if (!description || !button) return;
+
+    if (description.getAttribute('data-state') === 'truncated') {
+      description.style.display = 'block';
+      description.style.webkitLineClamp = 'unset';
+      description.style.webkitBoxOrient = 'unset';
+      description.style.overflow = 'visible';
+      description.style.height = 'auto';
+      description.setAttribute('data-state', 'expanded');
+      button.textContent = 'Less';
+    } else {
+      description.style.display = '-webkit-box';
+      description.style.webkitLineClamp = '3';
+      description.style.webkitBoxOrient = 'vertical';
+      description.style.overflow = 'hidden';
+      description.style.height = 'auto';
+      description.setAttribute('data-state', 'truncated');
+      button.textContent = 'More Details';
+    }
+  },
+
+  getProductVariantOrBase(productId) {
+    for (const product of this.rawProducts) {
+      if (product.id === productId) return { product, variant: null };
+      if (product.variants) {
+        const variant = product.variants.find(v => v.id === productId);
+        if (variant) return { product, variant };
+      }
+    }
+    return null;
+  },
+
+  formatCurrency: (amount) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD'
+    }).format(amount || 0);
+  },
+
+  getListingDisplayPrice: function(product) {
+    const suffix = app.isSubscription(product.category) ? '<span class="text-sm text-gray-500 font-normal">/mo</span>' : '';
+    if (!product.hasVariants) return app.formatCurrency(product.price) + suffix;
+
+    const variants = product.baseProduct && Array.isArray(product.baseProduct.variants) ? product.baseProduct.variants : [];
+    const variantPrices = variants.map(v => {
+      const p = typeof v.price === 'number' ? v.price : parseFloat(v.price);
+      return Number.isNaN(p) ? 0 : p;
+    }).filter(p => typeof p === 'number');
+
+    if (!variantPrices.length) return app.formatCurrency(product.price) + suffix;
+    const minPrice = Math.min(...variantPrices);
+    const maxPrice = Math.max(...variantPrices);
+
+    if (minPrice === maxPrice) return app.formatCurrency(minPrice) + suffix;
+    return `${app.formatCurrency(minPrice)} - ${app.formatCurrency(maxPrice)}`;
+  },
+
+  getUniqueCategories: function() {
+    const cats = new Set(this.products.map(p => p.category));
+    return Array.from(cats).sort();
+  },
+
+  // --- SIDEBAR LOGIC ---
+  renderSidebar: function() {
+    const container = document.getElementById('sidebar-content');
+    if (!container) return;
+
+    const categories = this.getUniqueCategories();
+    let html = `
+      <div class="px-2 py-1 text-xs font-bold text-gray-400 uppercase tracking-wider">Categories</div>
+      <div class="sidebar-link block text-gray-700 hover:text-gray-900 ${!this.filterCategory ? 'active' : ''}" data-cat="">
+        All
+      </div>
+    `;
+
+    categories.forEach(cat => {
+      html += `
+        <div class="sidebar-link block text-gray-600 hover:text-gray-900 ${this.filterCategory === cat ? 'active' : ''}" data-cat="${cat}">
+          ${this.pluralizeCategory(cat)}
+        </div>
+      `;
+    });
+
+    container.innerHTML = html;
+
+    // Add click listeners to all sidebar links using event delegation or direct attachment
+    const links = container.querySelectorAll('.sidebar-link');
+    links.forEach(link => {
+      link.addEventListener('click', function(e) {
+        e.preventDefault();
+        const cat = this.getAttribute('data-cat');
+        
+        // Update UI active state immediately
+        links.forEach(l => l.classList.remove('active'));
+        this.classList.add('active');
+
+        // If "All" is clicked, behave like "Shop Categories"
+        if (cat === '') {
+          app.shopCategoriesAction();
+        } else {
+          // For specific categories, go to home with filter
+          app.setView('home', cat);
+        }
+      });
+    });
+  },
+
+  // --- SCROLL TO FEATURED ---
+  scrollToFeatured: function() {
+    const featuredHeading = document.querySelector('#app-container h2');
+    if (featuredHeading) {
+      const header = document.querySelector('header.sticky');
+      const headerHeight = header ? header.offsetHeight : 64;
+      const elementPosition = featuredHeading.getBoundingClientRect().top + window.pageYOffset;
+      const offsetPosition = elementPosition - headerHeight - 16;
+      window.scrollTo({ top: offsetPosition, behavior: 'smooth' });
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  },
+
+  // --- SHOP CATEGORIES ACTION (Used by Nav Button and "All" Link) ---
+  shopCategoriesAction: function() {
+    // Reset View
+    app.setView('home', null);
+    
+    // Scroll to the filter area, ensuring banner/affiliate bottom is hidden
+    const filterArea = document.getElementById('filter-area');
+    if (filterArea) {
+      const header = document.querySelector('header.sticky');
+      const headerHeight = header ? header.offsetHeight : 64;
+      const elementPosition = filterArea.getBoundingClientRect().top + window.pageYOffset;
+      // Adjusted offset to ensure filter area is at top under nav bar without leftover banner elements
+      const offsetPosition = elementPosition - headerHeight - -24; 
+      window.scrollTo({ top: offsetPosition, behavior: 'smooth' });
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  },
+
+  // --- SCROLL TO TOP (Sidebar Reset & Product Top) ---
+  scrollToTop: function() {
+    const sidebar = document.querySelector('.sidebar-wrapper');
+    if (sidebar) {
+      sidebar.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    // Scroll main window to top
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  },
+
+  getProcessedProducts: function() {
+    let list = [...this.products];
+    if (this.filterCategory) {
+      list = list.filter(p => p.category === this.filterCategory);
+    }
+    if (this.searchQuery && this.searchQuery.trim() !== '') {
+      const q = this.searchQuery.toLowerCase();
+      list = list.filter(p => p.name.toLowerCase().includes(q) || (p.description && p.description.toLowerCase().includes(q)));
+    }
+
+    list.sort((a, b) => {
+      switch (this.sortBy) {
+        case 'id_asc': return a.id - b.id;
+        case 'id_desc': return b.id - a.id;
+        case 'name_asc': return a.name.localeCompare(b.name);
+        case 'name_desc': return b.name.localeCompare(a.name);
+        case 'price_asc': return a.price - b.price;
+        case 'price_desc': return b.price - a.price;
+        default: return a.id - b.id;
+      }
+    });
+
+    return list;
+  },
+
+  // --- SEARCH UPDATE LOGIC (Keeps focus) ---
+  updateSearchResults: function() {
+    const processed = app.getProcessedProducts();
+    const grid = document.getElementById('products-grid');
+    if (!grid) return;
+
+    // If we have a search query, show all matches immediately without pagination
+    if (app.searchQuery && app.searchQuery.trim() !== '') {
+        let html = '';
+        if (processed.length === 0) {
+            html = `<p class="text-center text-gray-500 py-10">No products found matching your criteria.</p>`;
+        } else {
+            html = `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">`;
+            processed.forEach(product => {
+                html += app.generateProductCardHtml(product);
+            });
+            html += `</div>`;
+        }
+        grid.innerHTML = html;
+        app.currentPage = 1; 
+    } else {
+        // Non-Search Mode: Use pagination
+        const totalPages = Math.ceil(processed.length / app.pageSize) || 1;
+        if (app.currentPage > totalPages) app.currentPage = 1;
+        const startIndex = (app.currentPage - 1) * app.pageSize;
+        const pageProducts = processed.slice(startIndex, startIndex + app.pageSize);
+
+        let html = '';
+        if (pageProducts.length === 0) {
+            html = `<p class="text-center text-gray-500 py-10">No products found matching your criteria.</p>`;
+        } else {
+            html = `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">`;
+            pageProducts.forEach(product => {
+                html += app.generateProductCardHtml(product);
+            });
+            html += `</div>`;
+        }
+        grid.innerHTML = html;
+
+        // Update Pagination
+        const paginationHtml = totalPages > 1 ? `
+            <div id="pagination-container" class="flex justify-center items-center space-x-2 mt-8">
+                <button onclick="app.currentPage--; app.renderHome();" ${app.currentPage === 1 ? 'disabled' : ''} class="px-4 py-2 border rounded-lg bg-white disabled:opacity-50">Prev</button>
+                <span class="text-sm text-gray-600 font-medium">Page ${app.currentPage} of ${totalPages}</span>
+                <button onclick="app.currentPage++; app.renderHome();" ${app.currentPage === totalPages ? 'disabled' : ''} class="px-4 py-2 border rounded-lg bg-white disabled:opacity-50">Next</button>
+            </div>
+        ` : '<div id="pagination-container"></div>';
+        document.getElementById('pagination-container') ? document.getElementById('pagination-container').innerHTML = paginationHtml : null;
+    }
+    
+    // Re-attach event listeners for variant selection in the new DOM nodes
+    app.reAttachVariantListeners();
+  },
+  
+  generateProductCardHtml: function(product) {
+      const activeVariantId = app.selectedBrowseVariants[product.id] || (product.hasVariants ? product.baseProduct.variants[0].id : null);
+      const activeVariant = product.hasVariants ? product.baseProduct.variants.find(v => v.id === activeVariantId) : null;
+      
+      const displayImage = activeVariant ? activeVariant.image : product.image;
+      const displayPriceHtml = app.getListingDisplayPrice(product);
+
+      return `
+        <div class="bg-white rounded-xl shadow-lg hover:shadow-xl transition duration-300 overflow-hidden flex flex-col product-card" id="product-card-${product.id}">
+          <div class="h-40 bg-gray-100 flex items-center justify-center p-4">
+            <img src="${displayImage}" id="product-img-${product.id}" onerror="this.onerror=null;this.src='https://placehold.co/400x300/E5E7EB/4B5563?text=NewRock';" alt="${product.name}" class="max-h-full max-w-full object-contain rounded-lg">
+          </div>
+          <div class="p-4 flex-grow flex flex-col">
+            <!-- Category and ID on same line, compact -->
+            <div class="flex justify-between items-center mb-1">
+              <span class="text-[10px] font-semibold uppercase text-gray-500 truncate max-w-[60%]" title="${product.category}">${product.category}</span>
+              <span class="text-[10px] text-gray-400 font-mono whitespace-nowrap ml-1">ID: ${product.id}</span>
+            </div>
+            <h3 class="text-sm font-bold text-gray-900 mb-2 tooltip-trigger line-clamp-2" title="${product.name}">${product.name}</h3>
+            
+            ${product.hasVariants ? `
+              <div class="flex items-center space-x-2 my-2">
+                ${product.baseProduct.variants.map(v => `
+                  <button 
+                    onclick="app.selectProductVariant(${product.id}, ${v.id}, '${v.color}', '${v.image}', ${v.price})" 
+                    title="${v.color}"
+                    class="w-4 h-4 rounded-full border-2 transition duration-150 ${activeVariantId === v.id ? 'border-blue-600 scale-125 ring-1 ring-blue-300' : 'border-gray-300 hover:scale-110'}"
+                    style="background-color: ${v.color_hex || v.color.toLowerCase()};">
+                  </button>
+                `).join('')}
+              </div>
+            ` : ''}
+
+            <div class="flex items-start justify-start mb-3 mt-auto text-left">
+              <p class="product-listing-price text-lg font-extrabold text-red-600 text-left w-full">${displayPriceHtml}</p>
+            </div>
+            
+            <div class="flex space-x-2 mt-auto">
+              <button onclick="app.setView('details', ${product.id})" class="flex-1 px-2 py-1.5 border border-gray-300 text-xs font-medium rounded-lg text-gray-700 hover:bg-gray-100 transition">View</button>
+              <button onclick="app.addToCartFromBrowse(${product.id})" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg shadow-md hover:shadow-lg transition flex items-center justify-center">Buy Now</button>
+            </div>
+          </div>
+        </div>
+      `;
+  },
+
+  reAttachVariantListeners: function() {
+      // The onclick attributes in the HTML string handle most events automatically.
+  },
+
+  renderHome: function() {
+    // Define banner variables
+    const bgImage = '{{ site.data.hero.bg_image }}' || null;
+    const bgColor = '{{ site.data.hero.bg_color }}' || '#1e40af';
+    let bannerBgStyle = bgImage
+      ? `background-image: linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5)), url('${bgImage}'); background-size: cover; background-position: center;`
+      : `background-color: ${bgColor};`;
+
+    // Reset variant selection for new browse view
+    if (!app.selectedBrowseVariants) app.selectedBrowseVariants = {};
+    app.products.forEach(product => {
+      if (product.hasVariants && product.baseProduct.variants) {
+        if (!app.selectedBrowseVariants[product.id]) {
+          app.selectedBrowseVariants[product.id] = product.baseProduct.variants[0].id;
+        }
+      }
+    });
+    
+    const container = document.getElementById('app-container');
+    const processed = app.getProcessedProducts();
+    const totalPages = Math.ceil(processed.length / app.pageSize) || 1;
+    if (app.currentPage > totalPages) app.currentPage = 1;
+    const startIndex = (app.currentPage - 1) * app.pageSize;
+    const pageProducts = processed.slice(startIndex, startIndex + app.pageSize);
+
+    let productsHtml = '';
+    if (pageProducts.length === 0) {
+      productsHtml = `<p class="text-center text-gray-500 py-10">No products found matching your criteria.</p>`;
+    } else {
+      // 3 Across Grid
+      productsHtml = `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">`;
+      pageProducts.forEach(product => {
+        productsHtml += app.generateProductCardHtml(product);
+      });
+      productsHtml += `</div>`;
+    }
+
+    // Pagination HTML (only used when NOT searching)
+    const paginationHtml = totalPages > 1 ? `
+        <div id="pagination-container" class="flex justify-center items-center space-x-2 mt-8">
+            <button onclick="app.currentPage--; app.renderHome();" ${app.currentPage === 1 ? 'disabled' : ''} class="px-4 py-2 border rounded-lg bg-white disabled:opacity-50">Prev</button>
+            <span class="text-sm text-gray-600 font-medium">Page ${app.currentPage} of ${totalPages}</span>
+            <button onclick="app.currentPage++; app.renderHome();" ${app.currentPage === totalPages ? 'disabled' : ''} class="px-4 py-2 border rounded-lg bg-white disabled:opacity-50">Next</button>
+        </div>
+    ` : '<div id="pagination-container"></div>';
+
+    // Affiliate Links HTML
+    const affiliateLinksHtml = `
+      <div id="affiliate-links-section" class="mt-8 space-y-4">
+        <div class="bg-gradient-to-r from-amber-50 to-orange-100 border border-amber-200 rounded-xl p-2 text-center mb-4">
+          <p class="text-amber-800 font-medium">
+            🔥 <strong>Shop XNET WiFi</strong> 🔥 Get unlimited high-speed internet with our plug-and-play devices.
+            <a href="https://xnetwifi.com/shop/?woosa_affiliate=50stateswireless" target="_blank" rel="sponsored noopener" class="underline font-bold text-amber-900 hover:text-amber-700 block sm:inline-block mt-1 sm:mt-0 sm:ml-2">Shop Now →</a>
+          </p>
+        </div>
+        <div class="bg-gradient-to-r from-amber-50 to-orange-100 border border-amber-200 rounded-xl p-2 text-center mb-4">
+          <p class="text-amber-800 font-medium">
+            🔥 <strong>Choose AirTalk Wireless </strong> 🔥 * And Get Your Smartphones For FREE Now!
+            * On Medicaid, SNAP, SSI & More. Free Shipping
+            <a href="https://airtalkwireless.com/lifeline-enrollment" target="_blank" rel="sponsored noopener" class="underline font-bold text-amber-900 hover:text-amber-700 ml-2">
+              Shop Now →</a>
+          </p>
+        </div>
+        <div class="bg-gradient-to-r from-amber-50 to-orange-100 border border-amber-200 rounded-xl p-2 text-center mb-4">
+          <p class="text-amber-800 font-medium">
+            🔥 <strong>Join US Mobile </strong> 🔥 Get $25 thanks to referral.
+            Start with a 30 day free trial, then as low as $17.50 per month for Unlimited.
+            <a href="https://www.usmobile.com/referrals?referrer=E20D0097&name=null&utm_campaign=monster_referral" target="_blank" rel="sponsored noopener" class="underline font-bold text-amber-900 hover:text-amber-700 block sm:inline-block mt-1 sm:mt-0 sm:ml-2">Shop Now →</a>
+          </p>
+        </div>
+      </div>
+    `;
+
+    // MODIFIED: Only show banner and affiliate links if filterCategory is null
+    const showBannerAndAffiliate = !app.filterCategory;
+
+    // --- IMPORTANT: Preserve Search Input Focus ---
+    const searchInput = document.getElementById('search-input');
+    const wasFocused = searchInput && document.activeElement === searchInput;
+    const cursorPosition = searchInput ? searchInput.selectionStart : 0;
+    const searchText = searchInput ? searchInput.value : '';
+
+    container.innerHTML = `
+      ${showBannerAndAffiliate ? `
+        <div class="rounded-xl shadow-2xl p-6 md:p-10 mb-10 border-4 border-white" style="${bannerBgStyle}">
+          <div class="flex flex-col md:flex-row items-center justify-between">
+            <div class="text-white space-y-4">
+              <h1 class="{{ site.data.hero.headline.size }} {{ site.data.hero.headline.weight }} mb-3" style="color: {{ site.data.hero.headline.color }};">
+                {{ site.data.hero.headline.text }}
+              </h1>
+              <p class="{{ site.data.hero.subtext.size }} mb-8" style="color: {{ site.data.hero.subtext.color }};">
+                {{ site.data.hero.subtext.text }}
+              </p>
+            </div>
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Affiliate Links Moved Here: Right under the Large Banner (if visible) -->
+      ${showBannerAndAffiliate ? affiliateLinksHtml : ''}
+      
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6 bg-white p-4 rounded-xl border border-gray-200 shadow-sm sticky top-16 z-20 ${app.filterCategory ? 'filter-mode' : ''}" id="filter-area">
+        <div>
+          <h2 class="text-xl font-bold text-gray-800">
+            ${app.filterCategory ? app.pluralizeCategory(app.filterCategory) : 'Featured Products'}
+          </h2>
+          <span class="text-sm text-gray-500">Showing ${processed.length} products</span>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3">
+          <input 
+            type="text" 
+            id="search-input"
+            placeholder="Search products..." 
+            value="${app.searchQuery}" 
+            class="px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <select id="sort-select" onchange="app.sortBy = this.value; app.render();" class="px-4 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="id_asc" ${app.sortBy === 'id_asc' ? 'selected' : ''}>Sort by ID: Low to High</option>
+            <option value="id_desc" ${app.sortBy === 'id_desc' ? 'selected' : ''}>Sort by ID: High to Low</option>
+            <option value="name_asc" ${app.sortBy === 'name_asc' ? 'selected' : ''}>Sort by Name: A to Z</option>
+            <option value="name_desc" ${app.sortBy === 'name_desc' ? 'selected' : ''}>Sort by Name: Z to A</option>
+            <option value="price_asc" ${app.sortBy === 'price_asc' ? 'selected' : ''}>Sort by Price: Low to High</option>
+            <option value="price_desc" ${app.sortBy === 'price_desc' ? 'selected' : ''}>Sort by Price: High to Low</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="products-grid">${productsHtml}</div>
+      ${paginationHtml}
+      
+      <!-- Affiliate Links added here as well for Category Pages -->
+      ${affiliateLinksHtml}
+    `;
+
+    // --- RESTORE FOCUS ---
+    const newSearchInput = document.getElementById('search-input');
+    if (newSearchInput) {
+        newSearchInput.value = searchText;
+        if (wasFocused) {
+            newSearchInput.focus();
+            // Restore cursor position if possible
+            if (typeof cursorPosition === 'number' && cursorPosition <= newSearchInput.value.length) {
+                newSearchInput.setSelectionRange(cursorPosition, cursorPosition);
+            }
+        }
+        
+        // Re-attach Search Listener with Debounce
+        newSearchInput.oninput = null;
+        newSearchInput.addEventListener('input', (e) => {
+          app.searchQuery = e.target.value;
+          
+          // Debounce logic: Wait 300ms after typing stops before rendering
+          if (app.searchTimeout) {
+            clearTimeout(app.searchTimeout);
+          }
+          
+          app.searchTimeout = setTimeout(() => {
+            app.isTyping = false;
+            app.currentPage = 1;
+            app.render(); 
+          }, 300);
+          
+          app.isTyping = true;
+        });
+    }
+    
+    // FIX: Re-enable pointer events on cart wrapper when returning to home
+    const cartWrapper = document.getElementById('cart-wrapper');
+    if (cartWrapper) {
+      cartWrapper.style.pointerEvents = 'auto';
+    }
+  },
+
+  renderDetails: () => {
+    const container = document.getElementById('app-container');
+    const baseProduct = app.rawProducts.find(p => p.id === app.currentProductId);
+    if (!baseProduct) {
+      container.innerHTML = `<div class="p-10 text-center"><h1 class="text-4xl text-gray-800 font-bold">Product Not Found</h1><button onclick="app.setView('home')" class="mt-5 bg-blue-600 text-white px-5 py-2 rounded-lg">Back to Store</button></div>`;
+      return;
+    }
+
+    const hasVariants = baseProduct.variants && Array.isArray(baseProduct.variants) && baseProduct.variants.length > 0;
+    const variants = hasVariants ? baseProduct.variants : [{ id: baseProduct.id, price: baseProduct.price, image: baseProduct.image, color: 'Default' }];
+    
+    if (!app.selectedVariantId || !variants.some(v => v.id === app.selectedVariantId)) {
+      app.selectedVariantId = variants[0].id;
+    }
+    const selectedVariant = variants.find(v => v.id === app.selectedVariantId) || variants[0];
+
+    const priceSuffix = app.isSubscription(baseProduct.category) ? '/month' : '';
+
+    container.innerHTML = `
+      <div class="bg-white rounded-xl shadow-2xl p-6 md:p-10">
+        <div class="flex flex-col lg:flex-row gap-8">
+          <div class="lg:w-1/2 bg-gray-50 rounded-lg p-6 flex items-center justify-center">
+            <img id="detail-product-image" src="${selectedVariant.image}" onerror="this.onerror=null;this.src='https://placehold.co/600x450/E5E7EB/4B5563?text=NewRock+Product';" alt="${baseProduct.name}" class="w-full h-auto object-contain rounded-lg max-h-96">
+          </div>
+          <div class="lg:w-1/2">
+            <span class="text-sm font-semibold uppercase text-gray-500">${baseProduct.category}</span>
+            <h1 class="text-3xl font-extrabold text-gray-900 mt-2 mb-2">${baseProduct.name}</h1>
+            <p id="detail-product-price" class="text-2xl font-extrabold text-red-600 mb-4">
+              ${app.formatCurrency(selectedVariant.price)}<span class="text-lg font-light text-gray-600">${priceSuffix}</span>
+            </p>
+            
+            ${hasVariants ? `
+              <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-700 mb-2">Color / Variant: <span id="selected-variant-label" class="font-bold">${selectedVariant.color}</span></label>
+                <div class="flex items-center space-x-3">
+                  ${variants.map(v => `
+                    <button 
+                      onclick="app.setDetailVariant(${v.id})" 
+                      title="${v.color}"
+                      class="w-8 h-8 rounded-full border-2 transition duration-150 ${app.selectedVariantId === v.id ? 'border-blue-600 scale-110 ring-2 ring-blue-300' : 'border-gray-300 hover:scale-105'}"
+                      style="background-color: ${v.color_hex || v.color.toLowerCase()};">
+                    </button>
+                  `).join('')}
+                </div>
+              </div>
+            ` : ''}
+
+            <div class="relative mb-6">
+              <p id="product-description" class="text-gray-600 leading-relaxed" data-state="truncated">${baseProduct.description}</p>
+              <button id="toggle-description" onclick="app.toggleDescription()" class="ml-auto text-sm font-medium text-red-600 hover:text-red-700 focus:outline-none">More Details</button>
+            </div>
+            <div class="mt-8 flex items-center space-x-4">
+              <button id="add-to-cart-btn" onclick="app.addToCart(${selectedVariant.id})" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 text-base font-semibold rounded-xl shadow-md hover:shadow-lg transition duration-150">Add to Cart</button>
+              <button onclick="app.setView('home')" class="px-4 py-2 border border-gray-300 text-gray-700 text-base font-semibold rounded-xl hover:bg-gray-100 transition duration-150">Back to Store</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
+  setDetailVariant: (variantId) => {
+    app.selectedVariantId = variantId;
+    app.renderDetails();
+  },
+
+  renderCart: () => {
+    app.updateCartCount();
+    const container = document.getElementById('app-container');
+    const totalItemCount = app.cart.reduce((sum, item) => sum + item.quantity, 0);
+
+    // Affiliate Links HTML (Included in Cart View)
+    const affiliateLinksHtml = `
+        <div id="affiliate-links-section" class="mt-8 space-y-4">
+          <div class="bg-gradient-to-r from-amber-50 to-orange-100 border border-amber-200 rounded-xl p-2 text-center mb-4">
+            <p class="text-amber-800 font-medium">
+              🔥 <strong>Shop XNET WiFi</strong> 🔥 Get unlimited high-speed internet with our plug-and-play devices.
+              <a href="https://xnetwifi.com/shop/?woosa_affiliate=50stateswireless" target="_blank" rel="sponsored noopener" class="underline font-bold text-amber-900 hover:text-amber-700 block sm:inline-block mt-1 sm:mt-0 sm:ml-2">Shop Now →</a>
+            </p>
+          </div>
+          <div class="bg-gradient-to-r from-amber-50 to-orange-100 border border-amber-200 rounded-xl p-2 text-center mb-4">
+            <p class="text-amber-800 font-medium">
+              🔥 <strong>Choose AirTalk Wireless </strong> 🔥 * And Get Your Smartphones For FREE Now!
+              * On Medicaid, SNAP, SSI & More. Free Shipping
+              <a href="https://airtalkwireless.com/lifeline-enrollment" target="_blank" rel="sponsored noopener" class="underline font-bold text-amber-900 hover:text-amber-700 ml-2">
+                Shop Now →</a>
+            </p>
+          </div>
+          <div class="bg-gradient-to-r from-amber-50 to-orange-100 border border-amber-200 rounded-xl p-2 text-center mb-4">
+            <p class="text-amber-800 font-medium">
+              🔥 <strong>Join US Mobile </strong> 🔥 Get $25 thanks to referral.
+              Start with a 30 day free trial, then as low as $17.50 per month for Unlimited.
+              <a href="https://www.usmobile.com/referrals?referrer=E20D0097&name=null&utm_campaign=monster_referral" target="_blank" rel="sponsored noopener" class="underline font-bold text-amber-900 hover:text-amber-700 block sm:inline-block mt-1 sm:mt-0 sm:ml-2">Shop Now →</a>
+            </p>
+          </div>
+        </div>
+    `;
+
+    if (app.cart.length === 0) {
+      container.innerHTML = `
+        <div class="max-w-3xl mx-auto bg-white p-8 rounded-xl shadow-2xl text-center my-10">
+          <h1 class="text-4xl font-bold text-gray-900 mb-4">Your Shopping Cart (0 Items)</h1>
+          <p class="text-xl font-semibold text-gray-500 mb-8">Your cart is currently empty.</p>
+          <button onclick="app.setView('home')" class="bg-blue-600 text-white px-8 py-3 rounded-lg font-semibold shadow-md hover:bg-blue-700 transition">Continue Shopping</button>
+        </div>
+        ${affiliateLinksHtml}
+      `;
+      return;
+    }
+
+    let subtotal = 0;
+    const cartItemsHtml = app.cart.map(item => {
+      const match = app.getProductVariantOrBase(item.id);
+      if (!match) return '';
+      const { product, variant } = match;
+      const title = variant ? `${product.name} (${variant.color})` : product.name;
+      const price = variant ? variant.price : product.price;
+      const image = variant ? variant.image : product.image;
+      const category = product.category;
+      const itemTotal = price * item.quantity;
+      subtotal += itemTotal;
+
+      const unitLabel = app.isSubscription(category) ? '/mo' : 'each';
+
+      return `
+        <div class="flex items-center justify-between py-4 border-b border-gray-200 gap-4">
+          <div class="flex items-center space-x-4">
+            <img src="${image}" alt="${title}" class="w-16 h-16 object-contain rounded-lg border border-gray-200 p-1 bg-white">
+            <div>
+              <h3 class="font-bold text-gray-900 text-sm leading-snug max-w-sm">${title}</h3>
+              <p class="text-xs text-indigo-600 mt-0.5">${category} <span class="text-indigo-400 ml-1">${app.formatCurrency(price)} ${unitLabel}</span></p>
+            </div>
+          </div>
+
+          <div class="flex items-center space-x-6">
+            <div class="flex items-center space-x-3">
+              <button onclick="app.updateCartQuantity(${item.id}, ${item.quantity - 1})" class="w-7 h-7 rounded-full bg-red-100 text-red-600 hover:bg-red-200 font-bold flex items-center justify-center transition">-</button>
+              <span class="font-bold text-gray-800 text-sm">${item.quantity}</span>
+              <button onclick="app.updateCartQuantity(${item.id}, ${item.quantity + 1})" class="w-7 h-7 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 font-bold flex items-center justify-center transition">+</button>
+            </div>
+            <p class="font-extrabold text-gray-900 text-sm w-20 text-right">${app.formatCurrency(itemTotal)}</p>
+            <button onclick="app.removeFromCart(${item.id})" title="Remove Item" class="text-red-400 hover:text-red-600 text-lg transition">
+              <svg class="w-5 h-5 fill-current" viewBox="0 0 20 20"><path d="M6 2a1 1 0 00-1 1v1H3a1 1 0 000 2h1v10a2 2 0 002 2h8a2 2 0 002-2V6h1a1 1 0 100-2h-2V3a1 1 0 00-1-1H6zm2 4a1 1 0 112 0v8a1 1 0 11-2 0V6zm4 0a1 1 0 112 0v8a1 1 0 11-2 0V6z"/></svg>
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const taxRate = 0.08875;
+    const tax = subtotal * taxRate;
+    const orderTotal = subtotal + tax;
+
+    container.innerHTML = `
+      <!-- Restored: Two column layout for Cart -->
+      <div class="flex flex-col lg:flex-row gap-8 items-start my-4">
+        <div class="lg:w-2/3 w-full bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+          <h1 class="text-3xl font-extrabold text-gray-900 pb-4 border-b border-gray-100">Your Shopping Cart (${totalItemCount} Items)</h1>
+          <div class="cart-items-scroll pr-2 mt-2">
+            ${cartItemsHtml}
+          </div>
+          <div class="mt-8">
+            <button onclick="app.setView('home')" class="inline-flex items-center px-6 py-3 bg-blue-700 hover:bg-blue-800 text-white font-medium rounded-lg transition shadow-md">
+              ← Continue Shopping
+            </button>
+          </div>
+        </div>
+
+        <div class="lg:w-1/3 w-full lg:sticky lg:top-24">
+          <div class="bg-gray-50 border-t-4 border-red-500 rounded-2xl p-6 shadow-lg">
+            <h2 class="text-2xl font-bold text-gray-900 mb-6">Order Summary</h2>
+            <div class="space-y-3 border-b border-gray-200 pb-4 text-gray-700 font-medium">
+              <div class="flex justify-between"><span>Subtotal:</span><span class="font-semibold text-gray-900">${app.formatCurrency(subtotal)}</span></div>
+              <div class="flex justify-between"><span>Tax (8.875%):</span><span class="font-semibold text-gray-900">${app.formatCurrency(tax)}</span></div>
+            </div>
+            <div class="flex justify-between pt-4 border-t border-gray-300">
+              <span class="text-xl font-extrabold nrw-text-red">Order Total:</span>
+              <span class="text-xl font-extrabold nrw-text-red">${app.formatCurrency(orderTotal)}</span>
+            </div>
+<div id="paypal-paylater-message" class="paypal-messaging"></div>
+<div
+    data-pp-message
+    data-pp-style-layout="text"
+    data-pp-style-logo-type="inline"
+    data-pp-style-text-color="black"
+    data-pp-amount="${orderTotal.toFixed(2)}"
+    data-pp-language="">
+</div>
+
+          </div>
+        <div class="mt-111 p-111 nrw-bg-white rounded-xl shadow-xl text-center text-green">
+          <p class="text-lg font-light">Secure Checkout With PayPal, Debit Or Credit Card</p>
+        </div>
+            <div id="paypal-pay-in-4-container" class="mb-4"></div>
+            <div id="paypal-button-container" class="space-y-3"></div>
+
+            <div class="mt-4 w-full bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-3 text-center text-xs font-semibold flex items-center justify-center gap-2">
+              <span>🚚</span> Free Shipping Nationwide - International Shipping Available 
+Rates Starting At $85 USD
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+
+    // FIX: Disable pointer events on cart wrapper when in cart view
+    const cartWrapper = document.getElementById('cart-wrapper');
+    if (cartWrapper) {
+      cartWrapper.style.pointerEvents = 'none';
+    }
+
+    app.renderPayPalSDK(orderTotal);
+  },
+
+  renderPayPalSDK: function(orderTotal) {
+    setTimeout(() => {
+      if (window.paypal && window.paypal.Buttons) {
+        document.getElementById('paypal-button-container').innerHTML = '';
+        window.paypal.Buttons({
+          createOrder: (data, actions) => {
+            return actions.order.create({
+              purchase_units: [{
+                amount: { value: orderTotal.toFixed(2) }
+              }]
+            });
+          },
+          onApprove: (data, actions) => {
+            return actions.order.capture().then(details => {
+              alert('Transaction completed by ' + details.payer.name.given_name);
+              app.cart = [];
+              app.saveCartToStorage();
+              app.setView('home');
+            });
+          }
+        }).render('#paypal-button-container');
+      } else if (window.PayPalSDK && window.PayPalSDK.Messages) {
+        document.getElementById('paypal-pay-in-4-container').innerHTML = '';
+        window.PayPalSDK.Messages({
+          amount: orderTotal.toFixed(2),
+          placement: 'payment'
+        }).render('#paypal-pay-in-4-container');
+      }
+    }, 100);
+  },
+
+  selectProductVariant: (productId, variantId, color, image, price) => {
+    if (!app.selectedBrowseVariants) app.selectedBrowseVariants = {};
+    app.selectedBrowseVariants[productId] = variantId;
+
+    const productImg = document.getElementById(`product-img-${productId}`);
+    if (productImg) productImg.src = image;
+
+    const priceEl = document.getElementById(`product-price-${productId}`);
+    if (priceEl) {
+      priceEl.innerHTML = app.formatCurrency(price);
+    }
+    
+    const card = document.getElementById(`product-card-${productId}`);
+    if (card) {
+      const buttons = card.querySelectorAll('button[onclick*="selectProductVariant"]');
+      buttons.forEach(btn => {
+        const btnId = btn.getAttribute('onclick').match(/selectProductVariant\((\d+), (\d+)/);
+        if (btnId && parseInt(btnId[2]) === variantId) {
+          btn.classList.add('border-blue-600', 'scale-125', 'ring-1', 'ring-blue-300');
+          btn.classList.remove('border-gray-300', 'hover:scale-110');
+        } else {
+          btn.classList.remove('border-blue-600', 'scale-125', 'ring-1', 'ring-blue-300');
+          btn.classList.add('border-gray-300', 'hover:scale-110');
+        }
+      });
+    }
+  },
+
+  updateCartQuantity: (variantOrProductId, newQuantity) => {
+    if (newQuantity <= 0) {
+      app.removeFromCart(variantOrProductId);
+      return;
+    }
+    const item = app.cart.find(i => i.id === variantOrProductId);
+    if (item) item.quantity = newQuantity;
+    app.saveCartToStorage();
+    app.updateCartCount();
+    app.renderCart();
+  },
+
+  removeFromCart: (variantOrProductId) => {
+    app.cart = app.cart.filter(i => i.id !== variantOrProductId);
+    app.saveCartToStorage();
+    app.updateCartCount();
+    app.renderCart();
+  },
+
+  addToCart: (productId) => {
+    const existingItem = app.cart.find(item => item.id === productId);
+    if (existingItem) existingItem.quantity += 1;
+    else app.cart.push({ id: productId, quantity: 1 });
+    
+    app.saveCartToStorage();
+    app.updateCartCount();
+    app.setView('cart');
+  },
+
+  addToCartFromBrowse: (productId) => {
+    const baseProduct = app.rawProducts.find(p => p.id === productId);
+    let variantId = productId;
+    if (baseProduct && baseProduct.variants && baseProduct.variants.length > 0) {
+      variantId = app.selectedBrowseVariants?.[productId] || baseProduct.variants[0].id;
+    }
+    app.addToCart(variantId);
+  },
+
+  setView: (newView, param = null) => {
+    app.view = newView;
+    app.currentProductId = null;
+    app.filterCategory = null;
+    app.currentPage = 1;
+
+    if (newView === 'details' && typeof param === 'number') {
+      app.currentProductId = param;
+    } else if (newView === 'home' && typeof param === 'string') {
+      app.filterCategory = param;
+    }
+
+    // Toggle Sidebar Visibility
+    const sidebar = document.getElementById('main-sidebar');
+    if (sidebar) {
+      // 1. Remove left side panel from cart
+      if (app.view === 'cart') {
+        sidebar.classList.add('cart-hidden');
+      } else {
+        sidebar.classList.remove('cart-hidden');
+      }
+    }
+
+    // 2. Handle Navigation Logic
+    if (newView === 'home') {
+      // If we are going to Home (from Logo, Home Button, or Shop Categories)
+      // Reset Sidebar
+      app.scrollToTop();
+      
+      // If param is null (Logo/Home/Shop Categories clicked), scroll to top (Banner visible)
+      // If param exists (Category clicked), scroll to filter area (Banner hidden)
+      if (param === null) {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    } 
+    else if (newView === 'cart') {
+      // Scroll to top of cart
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    app.render();
+    
+    // --- CART DROPDOWN LOGIC ---
+    // If we just entered cart view, close the dropdown immediately
+    if (newView === 'cart') {
+        const dropdown = document.getElementById('cartDropdown');
+        if (dropdown) {
+            // Use the same logic as mouseleave
+            dropdown.classList.add('hidden', 'opacity-0', 'invisible', 'translate-y-2');
+            dropdown.classList.remove('opacity-100', 'visible', 'translate-y-0');
+        }
+    }
+  },
+
+  render: () => {
+    app.updateCartCount();
+    
+    // Update Sidebar Active State
+    const sidebarLinks = document.querySelectorAll('.sidebar-link');
+    sidebarLinks.forEach(link => {
+      const cat = link.getAttribute('data-cat');
+      // For "All", data-cat is empty string
+      if (cat === '' && !app.filterCategory) {
+        link.classList.add('active');
+      } else if (cat === app.filterCategory) {
+        link.classList.add('active');
+      } else {
+        link.classList.remove('active');
+      }
+    });
+
+    // --- DEBOUNCE CHECK ---
+    // If the user is currently typing in the search box, DO NOT render immediately.
+    // Wait for the timeout in the input listener to trigger.
+    if (app.isTyping) {
+      return; 
+    }
+
+    if (app.view === 'home') app.renderHome();
+    else if (app.view === 'cart') app.renderCart();
+    else if (app.view === 'details') app.renderDetails();
+  }
+};
+
+// --- SHIP CATEGORIES NAV BUTTON LOGIC ---
+document.addEventListener('DOMContentLoaded', function() {
+  // Ensure the nav button calls the specific shopCategoriesAction
+  const shopCategoriesBtn = document.querySelector('button[onclick="app.shopCategoriesAction()"]');
+  if (shopCategoriesBtn) {
+    shopCategoriesBtn.setAttribute('onclick', "app.shopCategoriesAction();");
+  }
+});
+
+window.onload = () => app.init();
+</script>
+
+</body>
+</html>
+
